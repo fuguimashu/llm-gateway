@@ -29,7 +29,7 @@
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/yourname/llm-gateway
+git clone https://github.com/fuguimashu/llm-gateway.git
 cd llm-gateway
 
 # 2. 创建配置文件
