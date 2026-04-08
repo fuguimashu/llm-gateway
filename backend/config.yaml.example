@@ -1,0 +1,39 @@
+# LLM Gateway Configuration
+# Copy this file to config.yaml and fill in your values
+
+models:
+  - id: "openai/gpt-4o"
+    provider: "openai"
+    model_name: "gpt-4o"
+    api_key: "sk-your-openai-key"
+    priority: 0
+
+  - id: "openai/gpt-4o-mini"
+    provider: "openai"
+    model_name: "gpt-4o-mini"
+    api_key: "sk-your-openai-key"
+    priority: 1
+
+  - id: "anthropic/claude-sonnet-4-6"
+    provider: "anthropic"
+    model_name: "claude-sonnet-4-6"
+    api_key: "sk-ant-your-anthropic-key"
+    priority: 0
+
+  - id: "ollama/llama3.2"
+    provider: "ollama"
+    model_name: "llama3.2"
+    base_url: "http://localhost:11434"
+    priority: 2
+
+settings:
+  # Master key for admin operations (manage virtual keys, view logs)
+  master_key: "your-master-key-here"
+  # SQLite database path
+  database_url: "sqlite:///./llm_gateway.db"
+  # Health check: consecutive failures before cooldown
+  health_fail_threshold: 3
+  # Health check: cooldown period in seconds
+  health_cooldown_seconds: 30
+  # Request timeout in seconds
+  request_timeout: 120
