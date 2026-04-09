@@ -13,6 +13,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.providers.base import UnsupportedProviderRequestError
 from app.schemas.chat import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -20,10 +21,24 @@ from app.schemas.chat import (
     Message,
     UsageInfo,
 )
-from app.services.auth import AuthResult, authenticate, bearer, check_model_access
-from app.services.proxy_service import NoAvailableModelError, proxy_stream
+from app.config import ModelConfig
+from app.services.auth import authenticate, bearer, check_model_access
+from app.services.proxy_service import (
+    MidStreamProviderError,
+    ModelNotFoundError,
+    NoAvailableModelError,
+    get_available_candidates,
+    proxy_stream,
+)
 
 router = APIRouter()
+UNSUPPORTED_FIELDS = {
+    "functions",
+    "function_call",
+    "tools",
+    "tool_choice",
+    "parallel_tool_calls",
+}
 
 
 @router.post("/v1/chat/completions")
@@ -33,14 +48,16 @@ async def chat_completions(
     db: Session = Depends(get_db),
 ):
     auth = authenticate(credentials, db)
+    _validate_request_features(request)
     check_model_access(auth, request.model)
 
     virtual_key_id = auth.virtual_key.id if auth.virtual_key else None
 
     try:
+        candidates = get_available_candidates(request)
         if request.stream:
             return StreamingResponse(
-                proxy_stream(request, virtual_key_id),
+                proxy_stream(request, virtual_key_id, candidates),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
@@ -49,12 +66,27 @@ async def chat_completions(
             )
         else:
             # Buffer the stream and return a non-streaming response
-            content = await _buffer_stream(request, virtual_key_id)
+            content = await _buffer_stream(request, virtual_key_id, candidates)
             return content
 
+    except ModelNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+    except UnsupportedProviderRequestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
     except NoAvailableModelError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        )
+    except MidStreamProviderError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(exc),
         )
 
@@ -62,6 +94,7 @@ async def chat_completions(
 async def _buffer_stream(
     request: ChatCompletionRequest,
     virtual_key_id: str | None,
+    candidates: list[ModelConfig],
 ) -> ChatCompletionResponse:
     """Collect SSE chunks and assemble a non-streaming response."""
     full_content = []
@@ -71,7 +104,7 @@ async def _buffer_stream(
     finish_reason = "stop"
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
-    async for chunk in proxy_stream(request, virtual_key_id):
+    async for chunk in proxy_stream(request, virtual_key_id, candidates):
         if chunk.strip() == b"data: [DONE]" or chunk.strip() == b"data: [DONE]\n\n":
             continue
         if chunk.startswith(b"data:"):
@@ -112,3 +145,21 @@ async def _buffer_stream(
             total_tokens=total_tokens,
         ),
     )
+
+
+def _validate_request_features(request: ChatCompletionRequest) -> None:
+    if any(message.role == "tool" for message in request.messages):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Function calling is not supported by this gateway",
+        )
+
+    extra = request.model_extra or {}
+    unsupported = sorted(
+        field for field in UNSUPPORTED_FIELDS if extra.get(field) is not None
+    )
+    if unsupported:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported request fields: {', '.join(unsupported)}",
+        )

@@ -12,7 +12,7 @@ from typing import AsyncIterator
 import httpx
 
 from app.config import config, ModelConfig
-from app.providers.base import BaseProvider
+from app.providers.base import BaseProvider, UnsupportedProviderRequestError
 from app.providers.openai import OpenAIProvider
 from app.providers.anthropic import AnthropicProvider
 from app.schemas.chat import ChatCompletionRequest
@@ -21,6 +21,14 @@ from app.services.logger import LogEntry, write_log
 
 
 class NoAvailableModelError(Exception):
+    pass
+
+
+class ModelNotFoundError(Exception):
+    pass
+
+
+class MidStreamProviderError(Exception):
     pass
 
 
@@ -36,31 +44,48 @@ def _get_candidates(model_id: str) -> list[ModelConfig]:
     """
     Return active model configs that match the requested model_id,
     sorted by priority (ascending = higher priority).
-    Falls back to all active models if exact match not found.
     """
-    all_active = [m for m in config.models if m.is_active]
-    exact = [m for m in all_active if m.id == model_id]
-    candidates = exact if exact else all_active
-    return sorted(candidates, key=lambda m: m.priority)
+    exact = [m for m in config.models if m.is_active and m.id == model_id]
+    if not exact:
+        raise ModelNotFoundError(f"Model '{model_id}' is not configured")
+    return sorted(exact, key=lambda m: m.priority)
+
+
+def get_available_candidates(request: ChatCompletionRequest) -> list[ModelConfig]:
+    candidates = _get_candidates(request.model)
+    available = [c for c in candidates if health_checker.is_available(c.id)]
+    if not available:
+        raise NoAvailableModelError(f"No available provider for model '{request.model}'")
+
+    supported: list[ModelConfig] = []
+    last_validation_error: UnsupportedProviderRequestError | None = None
+    for model_cfg in available:
+        provider = _build_provider(model_cfg)
+        try:
+            provider.validate_request(request)
+        except UnsupportedProviderRequestError as exc:
+            last_validation_error = exc
+            continue
+        supported.append(model_cfg)
+
+    if not supported and last_validation_error is not None:
+        raise last_validation_error
+
+    return supported
 
 
 async def proxy_stream(
     request: ChatCompletionRequest,
     virtual_key_id: str | None,
+    candidates: list[ModelConfig],
 ) -> AsyncIterator[bytes]:
     """
     Stream SSE bytes to the caller. Tries candidates in priority order,
     falls back to next on transient errors. Logs each attempt.
     """
-    candidates = _get_candidates(request.model)
-    available = [c for c in candidates if health_checker.is_available(c.id)]
-
-    if not available:
-        raise NoAvailableModelError(f"No available provider for model '{request.model}'")
-
     last_error: Exception | None = None
 
-    for model_cfg in available:
+    for model_cfg in candidates:
         request_id = uuid.uuid4().hex
         provider = _build_provider(model_cfg)
         start = time.monotonic()
@@ -117,7 +142,11 @@ async def proxy_stream(
                 total_latency_ms=total_ms,
                 error_message=str(exc)[:512],
             ))
-            # Try next candidate
+            if got_first:
+                raise MidStreamProviderError(
+                    f"Provider '{model_cfg.id}' failed after streaming began"
+                ) from exc
+            # Try next candidate before the client has seen any bytes.
 
     raise NoAvailableModelError(
         f"All providers for '{request.model}' failed. Last error: {last_error}"
