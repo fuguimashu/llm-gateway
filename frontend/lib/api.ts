@@ -1,8 +1,21 @@
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const KEY = "llm_gateway_master_key";
 
-function getKey(): string {
+export function getStoredKey(): string {
   if (typeof window === "undefined") return "";
-  return localStorage.getItem("llm_gateway_master_key") ?? "";
+  return sessionStorage.getItem(KEY) ?? localStorage.getItem(KEY) ?? "";
+}
+
+export function storeKey(value: string): void {
+  if (typeof window === "undefined") return;
+  sessionStorage.setItem(KEY, value);
+  localStorage.removeItem(KEY);
+}
+
+export function clearStoredKey(): void {
+  if (typeof window === "undefined") return;
+  sessionStorage.removeItem(KEY);
+  localStorage.removeItem(KEY);
 }
 
 async function req<T>(
@@ -10,7 +23,7 @@ async function req<T>(
   options: RequestInit = {},
   key?: string,
 ): Promise<T> {
-  const token = key ?? getKey();
+  const token = key ?? getStoredKey();
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     headers: {

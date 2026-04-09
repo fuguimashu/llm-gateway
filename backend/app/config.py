@@ -26,6 +26,7 @@ class Settings:
     health_fail_threshold: int = 3
     health_cooldown_seconds: int = 30
     request_timeout: int = 120
+    cors_origins: list[str] = field(default_factory=lambda: ["*"])
 
 
 @dataclass
@@ -73,9 +74,32 @@ def load_config() -> Config:
         health_fail_threshold=s.get("health_fail_threshold", 3),
         health_cooldown_seconds=s.get("health_cooldown_seconds", 30),
         request_timeout=s.get("request_timeout", 120),
+        cors_origins=_parse_cors_origins(
+            os.getenv("CORS_ORIGINS"),
+            s.get("cors_origins"),
+        ),
     )
 
     return Config(models=models, settings=settings)
+
+
+def _parse_cors_origins(env_value: str | None, raw_value: object) -> list[str]:
+    if env_value:
+        parsed = [origin.strip() for origin in env_value.split(",") if origin.strip()]
+        if parsed:
+            return parsed
+
+    if isinstance(raw_value, list):
+        parsed = [str(origin).strip() for origin in raw_value if str(origin).strip()]
+        if parsed:
+            return parsed
+
+    if isinstance(raw_value, str):
+        parsed = [origin.strip() for origin in raw_value.split(",") if origin.strip()]
+        if parsed:
+            return parsed
+
+    return ["*"]
 
 
 # Singleton loaded at import time

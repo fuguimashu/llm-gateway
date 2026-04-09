@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Integer, String, Text, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
@@ -20,4 +20,4 @@ class RequestLog(Base):
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)       # time to first token
     total_latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)  # total
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))

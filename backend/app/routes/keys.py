@@ -1,7 +1,7 @@
 """Virtual Key management API. All endpoints require the master key."""
 
 import secrets
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials
@@ -37,7 +37,7 @@ def create_key(
         id=key,
         name=body.name,
         models=body.models,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
         is_active=True,
     )
     db.add(vk)

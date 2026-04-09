@@ -1,6 +1,6 @@
 """Virtual Key authentication."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -49,7 +49,7 @@ def authenticate(
         )
 
     # Update last used
-    vk.last_used_at = datetime.utcnow()
+    vk.last_used_at = datetime.now(UTC)
     db.commit()
 
     return AuthResult(virtual_key=vk)

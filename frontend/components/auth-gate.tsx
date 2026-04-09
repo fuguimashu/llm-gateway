@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getHealth } from "@/lib/api";
+import { clearStoredKey, getHealth, getStoredKey, listKeys, storeKey } from "@/lib/api";
 import { ShieldCheck, KeyRound } from "lucide-react";
-
-const KEY = "llm_gateway_master_key";
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
@@ -14,12 +12,27 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [testing, setTesting] = useState(false);
 
   useEffect(() => {
-    const stored = localStorage.getItem(KEY);
-    if (stored) {
-      setReady(true);
-    } else {
-      setNeedsKey(true);
+    async function bootstrap() {
+      const stored = getStoredKey();
+      if (!stored) {
+        setNeedsKey(true);
+        return;
+      }
+
+      setTesting(true);
+      try {
+        await listKeys(stored);
+        storeKey(stored);
+        setReady(true);
+      } catch {
+        clearStoredKey();
+        setNeedsKey(true);
+      } finally {
+        setTesting(false);
+      }
     }
+
+    void bootstrap();
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -28,13 +41,14 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     setTesting(true);
     setError("");
     try {
-      // Validate by hitting /health (no auth) then /v1/keys (needs master key)
       await getHealth();
-      localStorage.setItem(KEY, input.trim());
+      await listKeys(input.trim());
+      storeKey(input.trim());
       setReady(true);
       setNeedsKey(false);
     } catch {
-      setError("Could not reach the gateway. Check the API URL and key.");
+      clearStoredKey();
+      setError("Could not verify the gateway or master key. Check the API URL and try again.");
     } finally {
       setTesting(false);
     }
@@ -89,7 +103,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         </div>
 
         <p className="text-center text-ink-400 text-xs mt-4">
-          Key stored in browser localStorage
+          Key stored in browser sessionStorage for this session only
         </p>
       </div>
     </div>

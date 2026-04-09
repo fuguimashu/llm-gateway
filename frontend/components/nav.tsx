@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   LogOut,
 } from "lucide-react";
+import { clearStoredKey } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const links = [
@@ -23,7 +24,7 @@ export function Nav() {
   const path = usePathname();
 
   function handleLogout() {
-    localStorage.removeItem("llm_gateway_master_key");
+    clearStoredKey();
     window.location.reload();
   }
 
